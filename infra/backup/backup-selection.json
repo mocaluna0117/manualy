@@ -1,0 +1,7 @@
+{
+  "SelectionName": "manual-search-db",
+  "IamRoleArn": "arn:aws:iam::271357390238:role/manual-search-backup",
+  "Resources": [
+    "arn:aws:rds:ap-northeast-1:271357390238:db:manual-search-db"
+  ]
+}

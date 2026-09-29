@@ -1,0 +1,7 @@
+{
+  "AllowAdminCreateUserOnly": true,
+  "InviteMessageTemplate": {
+    "EmailSubject": "【Manualy】社内マニュアル検索システムへのご招待",
+    "EmailMessage": "<p>社内マニュアル検索システム「Manualy」へご招待します。</p><p>下のリンクを開き、以下の情報でサインインしてください。<br><a href=\"https://d3r3bcg6d6aepn.cloudfront.net\">https://d3r3bcg6d6aepn.cloudfront.net</a></p><p>ユーザー名: {username}<br>仮パスワード: {####}</p><p>初回のサインイン時に、ご自身のパスワードを設定していただきます。<br>仮パスワードの有効期限は7日間です。期限が切れた場合は管理者に再送を依頼してください。</p><p>心当たりがない場合は、このメールを破棄してください。</p>"
+  }
+}

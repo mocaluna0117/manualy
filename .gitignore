@@ -1,0 +1,32 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build outputs
+dist/
+build/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+# 本番ビルドの設定。秘密は無く(VITE_の値は全部公開JSに入る)、
+# これが無いとローカル向けのビルドを本番へ上げてしまうため追跡する
+!.env.production
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# logs / os
+*.log
+.DS_Store
+
+# docker volumes（local data）
+.volumes/
+
+
+# wrangler が作る作業用ディレクトリ
+.wrangler/

@@ -1,0 +1,108 @@
+[
+    {
+        "AlarmName": "manual-search-backend-5xx",
+        "AlarmDescription": "backendが5xxエラーを多発させている",
+        "Namespace": "AWS/ApplicationELB",
+        "MetricName": "HTTPCode_Target_5XX_Count",
+        "Dimensions": [
+            {
+                "Name": "TargetGroup",
+                "Value": "targetgroup/manual-search-backend/cf020a1092cd847e"
+            },
+            {
+                "Name": "LoadBalancer",
+                "Value": "app/manual-search-alb/c8c148eacbb5c7a3"
+            }
+        ],
+        "Statistic": "Sum",
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "Threshold": 5.0,
+        "ComparisonOperator": "GreaterThanThreshold",
+        "TreatMissingData": "notBreaching"
+    },
+    {
+        "AlarmName": "manual-search-backend-stopped",
+        "AlarmDescription": "backendサービスのタスクが動いていない",
+        "Namespace": "AWS/ECS",
+        "MetricName": "LiveTaskCount",
+        "Dimensions": [
+            {
+                "Name": "ClusterName",
+                "Value": "manual-search"
+            },
+            {
+                "Name": "ServiceName",
+                "Value": "backend"
+            }
+        ],
+        "Statistic": "Average",
+        "Period": 300,
+        "EvaluationPeriods": 2,
+        "Threshold": 1.0,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "breaching"
+    },
+    {
+        "AlarmName": "manual-search-backend-unhealthy",
+        "AlarmDescription": "backendがALBのヘルスチェックに失敗している(利用者は検索できない状態)",
+        "Namespace": "AWS/ApplicationELB",
+        "MetricName": "UnHealthyHostCount",
+        "Dimensions": [
+            {
+                "Name": "TargetGroup",
+                "Value": "targetgroup/manual-search-backend/cf020a1092cd847e"
+            },
+            {
+                "Name": "LoadBalancer",
+                "Value": "app/manual-search-alb/c8c148eacbb5c7a3"
+            }
+        ],
+        "Statistic": "Maximum",
+        "Period": 60,
+        "EvaluationPeriods": 3,
+        "Threshold": 1.0,
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "TreatMissingData": "notBreaching"
+    },
+    {
+        "AlarmName": "manual-search-db-low-storage",
+        "AlarmDescription": "RDSの空き容量が2GBを下回った",
+        "Namespace": "AWS/RDS",
+        "MetricName": "FreeStorageSpace",
+        "Dimensions": [
+            {
+                "Name": "DBInstanceIdentifier",
+                "Value": "manual-search-db"
+            }
+        ],
+        "Statistic": "Minimum",
+        "Period": 300,
+        "EvaluationPeriods": 1,
+        "Threshold": 2147483648.0,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "notBreaching"
+    },
+    {
+        "AlarmName": "manual-search-rag-stopped",
+        "AlarmDescription": "ragサービスのタスクが動いていない",
+        "Namespace": "AWS/ECS",
+        "MetricName": "LiveTaskCount",
+        "Dimensions": [
+            {
+                "Name": "ClusterName",
+                "Value": "manual-search"
+            },
+            {
+                "Name": "ServiceName",
+                "Value": "rag"
+            }
+        ],
+        "Statistic": "Average",
+        "Period": 300,
+        "EvaluationPeriods": 2,
+        "Threshold": 1.0,
+        "ComparisonOperator": "LessThanThreshold",
+        "TreatMissingData": "breaching"
+    }
+]

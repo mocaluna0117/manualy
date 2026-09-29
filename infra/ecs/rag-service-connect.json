@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "namespace": "manual-search",
+  "services": [
+    {
+      "portName": "rag-8000",
+      "discoveryName": "rag",
+      "clientAliases": [{ "port": 8000, "dnsName": "rag" }],
+      "timeout": {
+        "perRequestTimeoutSeconds": 900,
+        "idleTimeoutSeconds": 900
+      }
+    }
+  ]
+}

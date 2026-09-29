@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- ?v= はブラウザの頑固なfaviconキャッシュを破るためのバージョン番号 -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=4" />
+    <!--
+      ホーム画面に置いたときのアイコン。これが無いと、iOSは画面の縮小画像か
+      頭文字(「M」)で勝手に作ってしまう。iOSはPNGしか見ないのでSVGとは別に用意する。
+      角丸はOS側が付けるので、元絵は端まで塗った四角にしてある(public/app-icon.svg)
+    -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=1" />
+    <link rel="manifest" href="/manifest.json?v=1" />
+    <!-- ホーム画面に出る名前。長いと省略されるので短くしておく -->
+    <meta name="apple-mobile-web-app-title" content="Manualy" />
+    <!-- ホーム画面から開いたときにブラウザの枠を出さない(アプリのように見せる) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Manualy</title>
+    <style>
+      /*
+        アプリは画面いっぱいの枠で、スクロールするのは中の会話や一覧だけ。
+        ページ自体が動くようにしておくと、スマホでは中身が収まっていても
+        指で上下に動いて跳ね返り、画面が落ち着かない
+        (引っ張って再読み込みも起きる)。ページ自体は動かさない
+      */
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+      }
+      #root {
+        height: 100%;
+      }
+
+      /*
+        iOS Safariは、文字が16px未満の入力欄にカーソルが入ると
+        「読みにくいだろう」と画面を勝手に拡大する。拡大されたままだと
+        画面が横にはみ出し、送信ボタンが画面の外に出てしまう。
+
+        タッチ端末では入力欄の文字を16pxにして、これを起こさせない。
+        viewportで拡大を禁止する手もあるが、それだと本当に拡大したい人が
+        困るのでやらない(ピンチでの拡大はこれまで通りできる)。
+
+        Chakraの見た目はレイヤー(@layer)に入っているので、レイヤーに
+        属さないこの指定が優先される。個々の入力欄に書かなくても、
+        後から増えたものまで含めて効く
+      */
+      @media (hover: none) and (pointer: coarse) {
+        input,
+        textarea,
+        select {
+          font-size: 16px;
+        }
+      }
+    </style>
+    <script>
+      // 配色を<html>のクラスに反映する。Reactの描画より先に実行するので、
+      // 起動時に明るい画面が一瞬見える現象が起きない。
+      // Chakraは .dark クラスを見て配色を切り替える(_dark条件)。
+      // 設定(端末準拠/ライト固定/ダーク固定)はlocalStorageから読む。
+      // 設定変更の反映と端末側の変更監視はReact側(lib/settings.ts)が行う
+      ;(function () {
+        var mode = 'system'
+        try {
+          var saved = localStorage.getItem('manualSearch.settings.theme')
+          if (saved === 'light' || saved === 'dark') mode = saved
+        } catch (e) {
+          // ストレージが使えない環境は端末準拠のまま
+        }
+        var isDark =
+          mode === 'dark' ||
+          (mode === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        var root = document.documentElement
+        root.classList.toggle('dark', isDark)
+        root.classList.toggle('light', !isDark)
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

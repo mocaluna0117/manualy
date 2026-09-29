@@ -1,0 +1,138 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: manual_search_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      # 127.0.0.1に限定する。0.0.0.0だと同一LANの誰からでもpsqlで接続でき、
+      # ManualChunk.contentのマニュアル本文が平文で読める
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    volumes: 
+      - ./.volumes/db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # S3互換のオブジェクトストレージ(ローカル開発用)。本番はAmazon S3に差し替え
+  minio:
+    image: minio/minio:latest
+    container_name: manual_search_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      # こちらも127.0.0.1に限定(PDF本体が入っている)。
+      # backend/ragはDockerネットワーク経由(minio:9000)なので影響しない
+      - "127.0.0.1:${MINIO_PORT}:9000" # S3 API(アプリからの接続先)
+      - "127.0.0.1:${MINIO_CONSOLE_PORT}:9001" # 管理画面(ブラウザで見る用)
+    volumes:
+      - ./.volumes/minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 起動時にPDF保存用バケットを自動作成する使い捨てジョブ
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/${S3_BUCKET} &&
+      echo 'bucket ready: ${S3_BUCKET}'
+      "
+
+  # ============================================================
+  # ここから下は「本番同等のコンテナ構成」(ECS Fargateに載せる形)。
+  # 普段の開発では起動しない。使うとき: docker compose --profile app up -d --build
+  # ============================================================
+
+  # DBマイグレーションを流してから終了する使い捨てジョブ
+  migrate:
+    build:
+      context: ./backend
+      target: build # ビルドステージにはprisma CLIが入っている
+    profiles: ["app"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+    command: npx prisma migrate deploy
+
+  backend:
+    build: ./backend
+    profiles: ["app"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+    ports:
+      # Cognito認証で保護されており、スマホ実機からの動作確認にも使うため
+      # LANに開けたままにする(DB/MinIOと違い認証なしでは何も読めない)
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      FRONTEND_ORIGIN: http://localhost:8080
+      RAG_SERVICE_URL: http://rag:8000
+      # コンテナ内からは minio:9000 / ブラウザからは localhost:59000 と見え方が違う
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT}
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_FORCE_PATH_STYLE: "true"
+      COGNITO_REGION: ${AWS_REGION}
+      COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID}
+      COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID}
+      # RAGサービス呼び出し用の共有トークン(rag側と同じ値)
+      RAG_API_TOKEN: ${RAG_API_TOKEN}
+
+  rag:
+    build: ./rag
+    profiles: ["app"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      EMBEDDING_PROVIDER: bedrock
+      ANSWER_PROVIDER: bedrock
+      AWS_REGION: ${AWS_REGION}
+      BEDROCK_EMBEDDING_MODEL_ID: amazon.titan-embed-text-v2:0
+      BEDROCK_CHAT_MODEL_ID: jp.anthropic.claude-haiku-4-5-20251001-v1:0
+      # backendからの呼び出しだけを受け付ける(未設定だと全リクエストを拒否)
+      RAG_API_TOKEN: ${RAG_API_TOKEN}
+      # 取り込み用URLのダウンロード先をMinIOに限定(SSRF対策)
+      RAG_ALLOWED_DOWNLOAD_HOSTS: minio
+    volumes:
+      # ローカル実行用のAWS認証情報(読み取り専用)。本番ECSではタスクロールを使うので不要
+      - ~/.aws:/root/.aws:ro
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_GRAPHQL_URL: http://localhost:3000/graphql
+        VITE_COGNITO_AUTHORITY: https://cognito-idp.${AWS_REGION}.amazonaws.com/${COGNITO_USER_POOL_ID}
+        VITE_COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID}
+        VITE_COGNITO_DOMAIN: ${COGNITO_DOMAIN}
+    profiles: ["app"]
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend

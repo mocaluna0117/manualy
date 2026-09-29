@@ -1,0 +1,11 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-noncurrent-versions",
+      "Status": "Enabled",
+      "Filter": {},
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 90 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    }
+  ]
+}

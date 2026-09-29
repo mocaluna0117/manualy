@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+pypdf
+psycopg[binary]
+python-dotenv
+boto3
+# Cloudflare Workers AI(OpenAI互換API)。移行後はこちらが本番、boto3 は不要になる
+openai
+pypdfium2
+pillow
+pytest
+# PDF以外のマニュアルから本文を取り出す(Word/Excel/PowerPoint/Outlookメール)
+python-docx
+openpyxl
+python-pptx
+extract-msg

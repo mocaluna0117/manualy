@@ -1,0 +1,15 @@
+{
+  "BackupPlanName": "manual-search-daily",
+  "Rules": [
+    {
+      "RuleName": "daily-14days",
+      "TargetBackupVaultName": "manual-search",
+      "ScheduleExpression": "cron(0 18 * * ? *)",
+      "ScheduleExpressionTimezone": "Etc/UTC",
+      "StartWindowMinutes": 60,
+      "CompletionWindowMinutes": 180,
+      "Lifecycle": { "DeleteAfterDays": 14 },
+      "RecoveryPointTags": { "app": "manual-search", "kind": "daily" }
+    }
+  ]
+}

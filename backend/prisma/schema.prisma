@@ -1,0 +1,277 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  runtime      = "nodejs"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model ManualCategory {
+  id          String    @id @default(uuid())
+  // 一意制約はマイグレーションで書いた部分インデックス
+  // (ManualCategory_name_alive_key)で、生きているフォルダの中だけに効かせている。
+  // ゴミ箱のフォルダが名前を占有すると、再分類が同じ名前のフォルダを
+  // 作れず対象が未分類のまま残ってしまうため。Prismaは部分インデックスを
+  // 表現できないので、ここには@uniqueを書かない
+  name        String
+  manuals     Manual[]
+  // AIの自動分類が作ったフォルダかどうか。再分類で空になったフォルダを
+  // 片付けるとき、利用者が自分で作った箱をうっかり消さないよう区別する。
+  // 既定をfalseにしてあるのは安全側に倒すため(書き忘れても
+  // 「消してよい候補」に入らない)。AIが作る経路だけが明示的にtrueを入れる
+  createdByAi Boolean   @default(false) @map("created_by_ai")
+  // 管理者だけに見せるフォルダ。一般利用者には一覧にも検索にも出さず、
+  // AIの回答の根拠にもしない。一覧から隠すだけでは、質問への回答を通して
+  // 中身が漏れてしまうため、検索の段階で除く
+  adminOnly   Boolean   @default(false) @map("admin_only")
+  // 管理者がドラッグで決めた並び順(小さいほど上)。同値なら名前順
+  sortOrder   Int       @default(0) @map("sort_order")
+  // ゴミ箱。中のマニュアルごとフォルダを捨てられるようにするための印。
+  // フォルダと一緒に捨てたマニュアルには、同じ日時をdeletedAtに入れて
+  // 「どれを一緒に戻すか」を判別する
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([sortOrder, name])
+}
+
+// チャット入力欄から挿し込める定型文。管理者が運用しながら育てる
+model PromptTemplate {
+  id        String   @id @default(uuid())
+  title     String // 一覧に出す短い名前
+  body      String // 入力欄に挿入される本文
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sortOrder, createdAt])
+}
+
+// 管理者がAIに教える分類ルール(自然文)。
+// 「床暖房関連はフローリング関連へ」のような微妙な判断の感覚を蓄積し、
+// すべての自動分類(アップロード時・自動分類ボタン・チャット再分類)で最優先適用する
+model ClassificationRule {
+  id        String   @id @default(uuid())
+  text      String
+  createdAt DateTime @default(now())
+}
+
+// PDF取り込み(テキスト抽出→チャンク化→ベクトル化)の進行状況
+enum IngestStatus {
+  PENDING // 登録直後。取り込み待ち
+  PROCESSING // 取り込み中
+  COMPLETED // 取り込み完了。AI検索の対象になる
+  FAILED // 失敗。ingestManualで再試行できる
+}
+
+model Manual {
+  id               String            @id @default(uuid())
+  title            String
+  fileKey          String            @map("file_key") // S3上のファイルの場所(キー)
+  fileName         String            @map("file_name") // 元のPDFファイル名
+  fileLastModified DateTime?         @map("file_last_modified") // 元ファイルの最終更新日時(同名アップロード時の新旧判定に使用)
+  mimeType         String            @default("application/pdf") @map("mime_type")
+  size             Int // ファイルサイズ（バイト）
+  categoryId       String?
+  category         ManualCategory?   @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  // trueなら管理者が手動で分類した(ピン留め)。AIの再分類では動かさない
+  categoryPinned   Boolean           @default(false) @map("category_pinned")
+  chunks           ManualChunk[]
+  // PDF自体が持つ作成日(取り込み時に読み取る)。一覧の「作成日」列に使う
+  pdfCreatedAt     DateTime?         @map("pdf_created_at")
+  ingestStatus     IngestStatus      @default(PENDING) @map("ingest_status")
+  ingestError      String?           @map("ingest_error") // 失敗理由(FAILEDのとき)
+  chunkCount       Int?              @map("chunk_count") // 作成されたチャンク数
+  ingestedAt       DateTime?         @map("ingested_at")
+  // ゴミ箱。値が入っていたら削除済み扱いで、一覧・検索・AI回答から外す
+  deletedAt        DateTime?         @map("deleted_at")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  /// 分類ルールが食い違って保留になっているとき
+  classifyConflict ClassifyConflict?
+
+  // 外部キー列にPostgresは自動でインデックスを作らないので明示する。
+  // 一覧は「カテゴリで絞って作成日時の降順」で引くため複合にしておく
+  @@index([categoryId, createdAt])
+  @@index([deletedAt])
+}
+
+enum UserRole {
+  ADMIN // マニュアル管理などの管理操作が可能(権限制御は今後実装)
+  MEMBER
+}
+
+// 利用者。Cognitoで認証された人を、初回アクセス時にアプリ側にも自動登録する
+model User {
+  id            String         @id @default(uuid())
+  cognitoSub    String         @unique @map("cognito_sub") // Cognito側の不変ID
+  email         String?
+  role          UserRole       @default(MEMBER)
+  conversations Conversation[]
+  createdAt     DateTime       @default(now())
+}
+
+enum MessageRole {
+  USER // 利用者の質問
+  ASSISTANT // AIの回答
+}
+
+// 回答への評価(人の判断)。AIの自己申告より確かなので、集計ではこちらを優先する
+enum MessageFeedback {
+  GOOD // 役に立った
+  BAD // 役に立たなかった
+}
+
+// 会話スレッド(サイドバー履歴の1行)。所有者にだけ見える
+model Conversation {
+  id        String    @id @default(uuid())
+  title     String // 最初の質問から自動生成
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // チャット経由の管理操作(全マニュアル再分類など)の「確認待ち」状態。
+  // 確認はLLM任せにせず、次のメッセージでこの値を見て確定的に処理する
+  pendingAction Json? @map("pending_action")
+
+  @@index([userId, updatedAt])
+}
+
+model Message {
+  id                  String           @id @default(uuid())
+  conversationId      String           @map("conversation_id")
+  conversation        Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role                MessageRole
+  content             String
+  // 回答時点の根拠マニュアル(スナップショット)。後でマニュアルが削除されても履歴は読める
+  citations           Json?
+  // 絞り込み質問の選択肢(ASSISTANTのみ)。フロントでボタンとして表示する
+  options             Json?
+  // マニュアルから答えられたか(ASSISTANTのみ)。
+  // true=抜粋を根拠に回答、false=AIが「根拠なし」と申告=答えられなかった、
+  // null=判断材料がない(管理操作の応答・エラー・この列より前のデータ)。
+  // 「どの領域のマニュアルが足りないか」を集計するために記録する
+  answeredFromManuals Boolean?         @map("answered_from_manuals")
+  // 判定できなかった理由まで残す。answeredFromManualsだけだと、聞き返し・
+  // 管理操作・生成失敗・記録開始前がすべて同じnullに潰れ、集計を見ても
+  // 「仕組みが動いていないのか、対象外が多いだけなのか」が分からない。
+  // answered / no_basis / clarify / admin / failed / unreported / no_manuals
+  answerOutcome       String?          @map("answer_outcome")
+  // 回答への評価(ASSISTANTのみ)。AIの自己申告(answeredFromManuals)は
+  // 「抜粋を根拠にしたか」しか見ていないので、根拠はあっても知りたいことに
+  // 答えていない回答を拾えない。人が押した評価を別に持ち、集計では優先する
+  feedback            MessageFeedback?
+  // 👎のときだけ聞く理由(任意)。何が足りないかで打ち手が変わるため
+  feedbackReason      String?          @map("feedback_reason")
+  // 質問に添えた画像の置き場所(S3のキー)。会話を開き直しても
+  // 「あのとき送った画面」を見返せるようにするため、画像自体も残す。
+  // 会話を消したときは、この一覧を見てS3側も片付ける
+  imageKeys           Json?            @map("image_keys")
+  createdAt           DateTime         @default(now()) @map("created_at")
+
+  // 会話を開くたびに「この会話のメッセージを古い順」で引く
+  @@index([conversationId, createdAt])
+  // 利用状況の集計は会話をまたいで期間で絞るため、日時単体でも引けるようにする
+  @@index([createdAt])
+}
+
+// RAG用: マニュアルを検索しやすい断片に分割したもの。
+// embeddingV2はPrisma未対応のpgvector型なのでUnsupportedで宣言し、SQLで直接扱う
+model ManualChunk {
+  id          String                       @id @default(uuid())
+  manualId    String                       @map("manual_id")
+  manual      Manual                       @relation(fields: [manualId], references: [id], onDelete: Cascade)
+  chunkIndex  Int                          @map("chunk_index")
+  pageNumber  Int?                         @map("page_number") // 元PDFの何ページ目か(ピンポイント引用用)
+  content     String
+  // bge-m3(Workers AI)の埋め込み。1024次元。
+  // 旧 embedding 列(Bedrock Titan)は 2026-09-12 に落とした
+  // (AWS撤収でTitanのベクトルを作り直せなくなり、持っていても使い道が無いため)。
+  // 列名が embedding_v2 のままなのは、改名すると索引とSQLを全部触ることになるから
+  embeddingV2 Unsupported("vector(1024)")? @map("embedding_v2")
+  createdAt   DateTime                     @default(now()) @map("created_at")
+
+  @@unique([manualId, chunkIndex])
+}
+
+// 分類ルールが食い違ったマニュアルの保留。行き先は決めず、利用者に選んでもらう
+model ClassifyConflict {
+  id         String    @id @default(uuid())
+  manual     Manual    @relation(fields: [manualId], references: [id], onDelete: Cascade)
+  manualId   String    @unique @map("manual_id")
+  /// 行き先の候補(フォルダ名の配列)
+  candidates Json
+  /// 選んで解決した時刻。nullならまだ保留中
+  resolvedAt DateTime? @map("resolved_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([resolvedAt])
+}
+
+// 再分類を元に戻すための控え。動かす前と後の分類を、動いたマニュアルだけ記録する
+model ReclassifySnapshot {
+  id                String    @id @default(uuid())
+  /// ALL=全件再分類 / SELECTED=選んだ分 / UNCATEGORIZED=未分類をまとめて
+  kind              String
+  /// [{ manualId, before, after }]。beforeがnullなら元は未分類
+  entries           Json
+  /// この再分類でAIが新しく作ったフォルダの名前(戻すと空になる)
+  createdCategories Json?     @map("created_categories")
+  movedCount        Int       @map("moved_count")
+  /// 元に戻した時刻。nullならまだ戻していない
+  undoneAt          DateTime? @map("undone_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([createdAt])
+}
+
+// アプリからの問い合わせ。メール送信に失敗しても内容が残るようDBにも保存する
+model Inquiry {
+  id        String    @id @default(uuid())
+  userEmail String?   @map("user_email") // 送信者(ログイン中のユーザー)
+  message   String
+  // 添付画像の置き場所(S3のキー)。メールを見落としても画面から辿れるように残す
+  imageKeys Json?     @map("image_keys")
+  // 対応済みにした時刻。nullなら未対応(サイドバーに件数を出す)
+  handledAt DateTime? @map("handled_at")
+  createdAt DateTime  @default(now())
+
+  @@index([createdAt])
+}
+
+// 全件再分類の進み具合。以前はインスタンス内のメモリに持っていたが、
+// Cloud Run は複数に増えるので、別のインスタンスに当たると「動いていない」と
+// 返して進捗表示が壊れる。最新の1行を読めば状態が分かる形にする
+//
+// running=true の行は同時に1つだけ。部分ユニーク索引
+//   CREATE UNIQUE INDEX "ReclassifyJob_running_key"
+//     ON "ReclassifyJob"("running") WHERE "running";
+// を移行 20260910120000_reclassify_job_running_unique で当てている。
+// Prismaのスキーマ言語には WHERE 付きの索引の書き方が無いので、
+// 検索用の pg_trgm / HNSW と同じく生SQLの移行側だけに存在する
+model ReclassifyJob {
+  id                String    @id @default(uuid())
+  running           Boolean
+  movedCount        Int       @default(0) @map("moved_count")
+  createdCategories Json      @default("[]") @map("created_categories")
+  emptiedCategories Json      @default("[]") @map("emptied_categories")
+  movedToLocked     Json      @default("[]") @map("moved_to_locked")
+  skippedLocked     Json      @default("[]") @map("skipped_locked")
+  /// ルールが食い違って動かさなかった件数
+  conflictedCount   Int       @default(0) @map("conflicted_count")
+  /// 管理者が指定した分類方針(無ければnull)
+  instruction       String?
+  /// チャットから始めた場合、完了を書き戻す会話
+  conversationId    String?   @map("conversation_id")
+  error             String?
+  startedAt         DateTime  @default(now()) @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
+
+  @@index([startedAt])
+}

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!--
+    ホーム画面に置いたときのアプリアイコンの元絵。favicon.svgと同じ絵柄。
+
+    タブのfaviconと違い、角丸を自分では付けない。iOSもAndroidも
+    アイコンを自前の形(角丸の四角や円)で切り抜くので、こちらで角を丸めると
+    二重に丸まって縁が汚くなる。背景は透明にせず端まで塗る。
+
+    絵柄は切り抜きで欠けないよう、中央に寄せて少し余白を持たせている。
+  -->
+  <rect width="32" height="32" fill="#2b6cb0"/>
+  <g transform="translate(-2.5 -2.6)">
+    <!-- 開いた本(左ページは白、右ページは薄い青で立体感を出す) -->
+    <path d="M16 9.2c-2.3-1.5-5.3-1.7-8-.7v13.2c2.7-1 5.7-.8 8 .7z" fill="#ffffff"/>
+    <path d="M16 9.2c2.3-1.5 5.3-1.7 8-.7v13.2c-2.7-1-5.7-.8-8 .7z" fill="#dbe9fb"/>
+    <!-- 虫眼鏡(検索)。小さい表示でも読めるよう太めのストローク -->
+    <circle cx="20" cy="20" r="5" fill="none" stroke="#f6ad55" stroke-width="2.6"/>
+    <path d="M23.8 23.8 27.5 27.5" stroke="#f6ad55" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>

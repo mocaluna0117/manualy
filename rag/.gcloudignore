@@ -1,0 +1,21 @@
+# gcloud builds submit がアップロードするものから除く。
+#
+# 2026-09-12 に追加。これが無いと rag/ 配下を丸ごと上げてしまい、
+# gs://todoapp0117_cloudbuild に **.env が平文で**、**.venv が1万件**入っていた
+# (実測 64MB。backend 側は .gitignore が効いて 0.8MB だった)。
+# .dockerignore はイメージからは除くが、アップロードは除かない。
+
+.env
+.env.*
+!.env.example
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+tests/
+eval_dataset.jsonl

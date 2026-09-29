@@ -1,0 +1,402 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+type RagCitation {
+  manualId: String!
+  title: String!
+  snippet: String!
+  pageNumber: Int
+}
+
+type RagAnswer {
+  answer: String!
+  citations: [RagCitation!]!
+  options: [String!]!
+}
+
+type UnansweredQuestion {
+  id: ID!
+  question: String!
+  answer: String!
+  askedAt: DateTime!
+  ratedBad: Boolean!
+  feedbackReason: String
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+type ManualDraft {
+  draft: String!
+  sources: [RagCitation!]!
+}
+
+type QuestionTheme {
+  theme: String!
+  count: Int!
+  examples: [String!]!
+}
+
+type ManualUsage {
+  manualId: ID!
+  title: String!
+  categoryName: String
+  citedCount: Int!
+  lastCitedAt: DateTime
+}
+
+type AnalyticsSummary {
+  questionCount: Int!
+  answeredCount: Int!
+  unansweredCount: Int!
+  unknownCount: Int!
+  outOfScopeCount: Int!
+  failedCount: Int!
+  unreportedCount: Int!
+  notRecordedCount: Int!
+  ratedGoodCount: Int!
+  ratedBadCount: Int!
+  neverCitedManualCount: Int!
+}
+
+type UserProfile {
+  id: ID!
+  email: String
+  role: UserRole!
+}
+
+"""ADMIN=マニュアル管理可 / MEMBER=閲覧・検索のみ"""
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+type ManagedUser {
+  cognitoSub: ID!
+  email: String
+  role: UserRole!
+  passwordPending: Boolean
+  createdAt: DateTime
+  temporaryPassword: String
+}
+
+type InviteFailure {
+  email: String!
+  reason: String!
+}
+
+type InviteResult {
+  invited: [ManagedUser!]!
+  failed: [InviteFailure!]!
+}
+
+type ManualCategory {
+  id: ID!
+  name: String!
+  totalSize: Float!
+  manualCount: Int!
+  adminOnly: Boolean!
+  deletedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type ManualUploadTarget {
+  uploadUrl: String!
+  fileKey: String!
+}
+
+type Manual {
+  id: ID!
+  title: String!
+  fileKey: String!
+  fileName: String!
+  fileLastModified: DateTime
+  pdfCreatedAt: DateTime
+  mimeType: String!
+  size: Int!
+  categoryId: ID
+  categoryPinned: Boolean!
+  ingestStatus: IngestStatus!
+  ingestError: String
+  chunkCount: Int
+  deletedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+"""PDF取り込みの進行状況"""
+enum IngestStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+type RegisterManualResult {
+  manual: Manual!
+  outcome: RegisterOutcome!
+  existingFileLastModified: DateTime
+  incomingFileLastModified: DateTime
+}
+
+"""登録結果(新規/既存を更新/古いためスキップ)"""
+enum RegisterOutcome {
+  CREATED
+  UPDATED
+  SKIPPED_OLDER
+}
+
+type ClassifyConflict {
+  manualId: ID!
+  title: String!
+  currentCategory: String
+  candidates: [String!]!
+}
+
+type ResolveConflictResult {
+  movedTo: String
+  remaining: Int!
+}
+
+type LastReclassify {
+  id: ID!
+  kind: String!
+  movedCount: Int!
+  createdCategories: [String!]!
+  createdAt: DateTime!
+}
+
+type UndoReclassifyResult {
+  restoredCount: Int!
+  skippedCount: Int!
+  skipped: [String!]!
+  createdCategories: [String!]!
+}
+
+type AutoOrganizeResult {
+  conflictedCount: Int!
+  movedCount: Int!
+  createdCategories: [String!]!
+  movedToLocked: [String!]!
+}
+
+type EmptiedCategory {
+  id: ID!
+  name: String!
+  createdByAi: Boolean!
+}
+
+type ReclassifiedManual {
+  title: String!
+  categoryName: String!
+  adminOnly: Boolean!
+}
+
+type ReclassifySelectedResult {
+  conflictedCount: Int!
+  movedCount: Int!
+  moved: [ReclassifiedManual!]!
+  skippedPinned: [String!]!
+  skippedNotReady: [String!]!
+  skippedLocked: [String!]!
+  createdCategories: [String!]!
+}
+
+type DeleteEmptyCategoriesResult {
+  deletedIds: [ID!]!
+  skipped: [String!]!
+}
+
+type ReclassifyStatus {
+  running: Boolean!
+  conflictedCount: Int!
+  movedCount: Int!
+  createdCategories: [String!]!
+  emptiedCategories: [EmptiedCategory!]!
+  movedToLocked: [String!]!
+  skippedLocked: [String!]!
+  error: String
+  finishedAt: DateTime
+}
+
+type RestoreCategoriesResult {
+  restoredCount: Int!
+  mergedInto: [String!]!
+  restoredSeparately: [String!]!
+}
+
+type ManualViewTarget {
+  url: String!
+  fileName: String!
+  viewableInBrowser: Boolean!
+}
+
+type ManualDownloadTarget {
+  id: ID!
+  title: String!
+  fileName: String!
+  url: String!
+}
+
+type ReclassifyCounts {
+  target: Int!
+  pinned: Int!
+  locked: Int!
+}
+
+type ManualSearchResult {
+  manual: Manual!
+  snippet: String
+}
+
+type ChatMessage {
+  id: ID!
+  role: MessageRole!
+  content: String!
+  citations: [RagCitation!]!
+  options: [String!]!
+  imageUrls: [String!]!
+  feedback: MessageFeedback
+  feedbackReason: String
+  createdAt: DateTime!
+}
+
+"""メッセージの発言者(USER=質問 / ASSISTANT=AI回答)"""
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+"""回答への評価(GOOD=役に立った / BAD=役に立たなかった)"""
+enum MessageFeedback {
+  GOOD
+  BAD
+}
+
+type Conversation {
+  id: ID!
+  title: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  messages: [ChatMessage!]!
+}
+
+type ClassificationRule {
+  id: ID!
+  text: String!
+  createdAt: DateTime!
+}
+
+type InquiryItem {
+  id: ID!
+  userEmail: String
+  message: String!
+  imageUrls: [String!]!
+  imagesPurged: Boolean!
+  handledAt: DateTime
+  createdAt: DateTime!
+}
+
+type InquiryCounts {
+  unhandled: Int!
+  total: Int!
+}
+
+type PromptTemplate {
+  id: ID!
+  title: String!
+  body: String!
+}
+
+type Query {
+  health: String!
+  dbHealth: String!
+  analyticsSummary(days: Int): AnalyticsSummary!
+  unansweredQuestions(days: Int): [UnansweredQuestion!]!
+  manualUsage(days: Int): [ManualUsage!]!
+  questionThemes(days: Int): [QuestionTheme!]!
+  ragHealth: String!
+  ragSearch(question: String!): RagAnswer!
+  me: UserProfile!
+  users: [ManagedUser!]!
+  manualCategories: [ManualCategory!]!
+  conversations: [Conversation!]!
+  conversation(id: ID!): Conversation!
+  manuals(categoryId: ID, uncategorized: Boolean): [Manual!]!
+  searchManuals(keyword: String!): [ManualSearchResult!]!
+  manualDownloadUrl(id: ID!): ManualViewTarget!
+  manualDownloadUrls(ids: [ID!]!): [ManualDownloadTarget!]!
+  pendingClassifyConflicts: [ClassifyConflict!]!
+  lastReclassify: LastReclassify
+  reclassifyStatus: ReclassifyStatus!
+  reclassifyCounts: ReclassifyCounts!
+  trashedManuals: [Manual!]!
+  trashedCategories: [ManualCategory!]!
+  classificationRules: [ClassificationRule!]!
+  inquiries(days: Int): [InquiryItem!]!
+  inquiryCounts: InquiryCounts!
+  promptTemplates: [PromptTemplate!]!
+}
+
+type Mutation {
+  draftManual(question: String!): ManualDraft!
+  inviteUsers(emails: [String!]!, role: UserRole): InviteResult!
+  updateUserRole(cognitoSub: ID!, role: UserRole!): ManagedUser!
+  deleteUser(cognitoSub: ID!): Boolean!
+  createManualCategory(name: String!, adminOnly: Boolean): ManualCategory!
+  updateManualCategory(id: ID!, name: String!, adminOnly: Boolean): ManualCategory!
+  deleteManualCategory(id: ID!): ManualCategory!
+  reorderManualCategories(ids: [ID!]!): Int!
+  rateAnswer(messageId: ID!, feedback: MessageFeedback, reason: String): ChatMessage!
+  renameConversation(id: ID!, title: String!): Conversation!
+  deleteConversation(id: ID!): Conversation!
+  createManualUploadUrl(fileName: String!): ManualUploadTarget!
+  registerManual(input: RegisterManualInput!): RegisterManualResult!
+  moveManual(id: ID!, categoryId: ID): Manual!
+  startReclassifyAll(instruction: String): Boolean!
+  resolveClassifyConflict(manualId: ID!, category: String): ResolveConflictResult!
+  undoLastReclassify: UndoReclassifyResult!
+  setManualPinned(id: ID!, pinned: Boolean!): Manual!
+  autoOrganizeManuals: AutoOrganizeResult!
+  moveManuals(ids: [ID!]!, categoryId: ID): Int!
+  deleteManual(id: ID!): Manual!
+  deleteManuals(ids: [ID!]!): Int!
+  restoreManuals(ids: [ID!]!): Int!
+  renameManual(id: ID!, title: String!): Manual!
+  reclassifySelectedManuals(ids: [ID!]!): ReclassifySelectedResult!
+  deleteEmptyCategories(ids: [ID!]!): DeleteEmptyCategoriesResult!
+  restoreCategories(ids: [ID!]!): RestoreCategoriesResult!
+  purgeCategories(ids: [ID!]!): Int!
+  purgeManuals(ids: [ID!]!): Int!
+  emptyTrash: Int!
+  ingestManual(id: ID!): Boolean!
+  createClassificationRule(text: String!): ClassificationRule!
+  updateClassificationRule(id: ID!, text: String!): ClassificationRule!
+  deleteClassificationRule(id: ID!): ClassificationRule!
+  sendInquiry(message: String!, images: [InquiryImageInput!]): Boolean!
+  setInquiryHandled(id: ID!, handled: Boolean!): InquiryItem!
+  createPromptTemplate(title: String!, body: String!): PromptTemplate!
+  updatePromptTemplate(id: ID!, title: String!, body: String!): PromptTemplate!
+  deletePromptTemplate(id: ID!): PromptTemplate!
+  reorderPromptTemplates(ids: [ID!]!): Int!
+}
+
+input RegisterManualInput {
+  title: String!
+  fileKey: String!
+  fileName: String!
+  size: Int!
+  categoryId: ID
+  autoCategorize: Boolean
+  fileLastModified: DateTime
+  forceReplace: Boolean
+}
+
+input InquiryImageInput {
+  base64: String!
+  format: String!
+}
