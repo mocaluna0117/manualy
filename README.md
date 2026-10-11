@@ -6,6 +6,9 @@
 とある企業の社内での利用を前提に作っている。
 機密資料を扱うため、ログインしないと何も見えない（招待制・Supabase Auth）。
 
+> 作品説明資料と動作紹介動画は [docs/portfolio/](docs/portfolio/) にある（[PORTFOLIO.md](docs/portfolio/PORTFOLIO.md) ／ [manualy-demo.mp4](docs/portfolio/manualy-demo.mp4)）。
+> 画面写真と動画は、デモ用に作った架空の会社・架空のマニュアルで撮影した。
+
 ```text
 利用者:「トイレの漏水はどう対応する？」
   ↓
