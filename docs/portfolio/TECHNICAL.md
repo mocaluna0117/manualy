@@ -2,6 +2,8 @@
 
 本資料は、Manualy が**どう作られているか**を、データ構造・パラメータ・SQL・コードの単位で説明する。何のために作り、何が良くなったか（動機と測定結果）は [作品説明資料](https://github.com/mocaluna0117/manualy/blob/main/docs/portfolio/PORTFOLIO.md) にあるので繰り返さない。数値と名前はすべてリポジトリのコードとマイグレーションから引き、根拠のファイルを各節にリンクした。
 
+本番の置き場所は2026年のうちに2回変わり、いまは3つ目の構成へ移す前の段階にある（11章）。1〜10章は、2つ目の構成（Google Cloud・11.2）で動いていたコードの説明である。
+
 ---
 
 ## 1. 全体の構成
@@ -467,9 +469,198 @@ $\mathrm{rank}_i$ は上位8件の中で期待するマニュアルが最初に�
 
 ---
 
-## 11. 本資料について
+## 11. インフラの移り変わり
 
-本資料は、Claude Code（Anthropic）がこのリポジトリのコードを読んで下書きしたものである。数値や設定はコード（b9c52ff時点）から引いている。
+なぜ移したか（クレジットが尽きる前に、機能を落とさず月額0円にする）は [作品説明資料][portfolio] の「(3)」にある。ここでは、それぞれの構成の部品・設定値・判断と、これから移す構成の設計を書く。
+
+| 期間 | 構成 | 月額 | 終わった理由 |
+|---|---|---|---|
+| 2026-06-02〜 | 手元の Docker Compose（PostgreSQL + pgvector、S3互換の MinIO） | — | 開発用。今も使う |
+| 2026-07-28〜09-11 | **AWS**（東京。全経路が動いたのは 08-05） | 約$85（実測。無料クレジットから払う） | クレジットが9月末に尽きる見込みになった |
+| 2026-09-11〜10-11 | **無料構成**（Google Cloud + Supabase + Cloudflare） | 0円 | Google Cloud の無料トライアルが終わり、API が止まった（11.3） |
+| 計画中 | **書き直し版**（Supabase Edge Functions + Cloudflare） | 0円 | — |
+
+### 11.1 AWS版（2026-07-28〜09-11）
+
+```mermaid
+flowchart LR
+  B["ブラウザ"] -->|"HTTPS"| CF["CloudFront"]
+  CF -->|"/*"| SF[("S3<br/>画面")]
+  CF -->|"/graphql（HTTP）"| ALB["ALB"]
+  ALB --> BE["backend<br/>ECS Fargate"]
+  BE -->|"Service Connect"| R["rag<br/>ECS Fargate"]
+  BE --> DB[("RDS<br/>PostgreSQL 16 + pgvector")]
+  R --> DB
+  B -->|"署名付きURLで PUT / GET"| SM[("S3<br/>マニュアル")]
+  R -->|"署名付きURLで GET"| SM
+  R -->|"埋め込み・生成"| BR["Bedrock"]
+  B -->|"ログイン"| CG["Cognito"]
+```
+
+| 部品 | 設定 | 判断 |
+|---|---|---|
+| 画面 | S3 + CloudFront。S3 は CloudFront からの GET だけを受ける（OAC） | Cognito のログイン後の戻り先は HTTPS が必須。独自ドメイン無しで HTTPS を得るために CloudFront を置いた |
+| APIの入口 | CloudFront の `/graphql` だけを ALB へ送る。ALB は CloudFront の IP 範囲（AWS 管理のプレフィックスリスト）からしか受けない | 画面と API を同じオリジンにまとめ、CORS が起きないようにした |
+| backend | Fargate 0.25 vCPU / 512 MB・ARM64・1タスク | メモリはローカルで測って決めた（待機時 158 MB） |
+| rag | Fargate 0.5 vCPU / 1 GB・ARM64・1タスク。ALB には繋がず、backend から Service Connect（`http://rag:8000`）でだけ届く | 待機時 99 MB、30ページの画像化でも +20 MB ほど |
+| DB | RDS db.t4g.micro・PostgreSQL 16.14・pgvector 0.8.2・gp3 20 GB。非公開 | 無料プランではバックアップの保持が1日に制限されたので、AWS Backup で日次スナップショット（14日保持）を別に取った |
+| ファイル | S3。公開アクセスを4項目すべて止め、保管時に暗号化 | — |
+| AI | Bedrock: 埋め込みは Titan Text Embeddings V2（1024次元）、生成は Claude Haiku 4.5 | — |
+| 認証・メール | Cognito（ホストUI + PKCE）、SES | — |
+| ネットワーク | 既定の VPC。NAT Gateway を置かず、タスクに公開IPを付けて外へ出る。受信はセキュリティグループで塞ぐ | NAT Gateway は月約$33で、ALB より高い |
+
+**費用**: 見積もりは常時起動で月約$63だったが、実測は1日$2.85（月約$85）だった。30日分の内訳は Fargate $13.20、RDS $10.22、ALB $8.68、公開IP $7.80、Bedrock $3.57、Secrets Manager $0.39 で、**AIの代金は1割に満たず、残りは止めても消えない置き場所の代金**だった。夜と休日に止めるスクリプト（`aws-stop.sh`）でも、ALB・公開IP・ストレージで1日約$1が残る。
+
+**踏んだ落とし穴**（記録は [deployment-plan.md][deploy-plan]）:
+
+- ALB のヘルスチェックに使った `GET /hello` が、全体にかけた認証で 401 を返し、ALB が全タスクを異常と判定し続けた。認証の要らない `/healthz` を足し、**DB と rag は見ない**ようにした。依存先の障害で落とすと、ECS がタスクを入れ替え続けるだけで直らないため
+- RDS の証明書は Amazon 独自の CA で署名されていて、Node の標準の信頼ストアに無い。CA を渡しても、接続文字列に `sslmode=require` が残っていると `pg` が後から `ssl` の設定を上書きし、CA が捨てられた。`sslmode` を URL から外して CA だけを効かせ、rag（psycopg）は `verify-full` にした。`rejectUnauthorized: false` は中間者を検知できないので使わない
+- 回答のストリーミングには `bedrock:InvokeModelWithResponseStream` が、添付付きのメールには `ses:SendRawEmail` が、それぞれ別の権限として要った
+
+### 11.2 無料構成（2026-09-11〜10-11）
+
+```mermaid
+flowchart LR
+  B["ブラウザ"] -->|"画面"| P["Cloudflare Pages"]
+  B -->|"ログイン"| AU["Supabase Auth"]
+  B -->|"GraphQL / SSE + JWT"| BE["backend<br/>Cloud Run"]
+  B -->|"署名付きURLで PUT / GET"| R2[("Cloudflare R2")]
+  BE -->|"HTTP + X-Api-Token"| R["rag<br/>Cloud Run"]
+  BE -->|"タスク登録"| Q["Cloud Tasks"]
+  Q -->|"POST /internal/*"| BE
+  BE --> DB[("Supabase<br/>PostgreSQL 17 + pgvector")]
+  R --> DB
+  R -->|"署名付きURLで GET"| R2
+  R -->|"埋め込み・生成・画像認識"| AI["Workers AI"]
+```
+
+| 部品 | AWS版 | 無料構成 | 変えたこと・判断 |
+|---|---|---|---|
+| 画面 | S3 + CloudFront | Cloudflare Pages | API が別オリジンになったので、backend の CORS で画面のオリジンだけを許す |
+| backend | Fargate + ALB | Cloud Run（us-west1）512 MiB・1 vCPU・同時40・最大2・最小0・起動時のCPUブースト・タイムアウト1800秒 | 設定は [deploy-cloudrun.sh][deploy-cloudrun] |
+| rag | Fargate（非公開） | Cloud Run 1 GiB・1 vCPU・同時4・最大2 | 公開URLを持つので、共有トークンが無ければ全部拒否する（未設定なら503。1.2） |
+| 裏の処理 | 同じプロセスの中 | Cloud Tasks（取り込みと再分類の2本。同時1・試行1・締切1800秒） | Cloud Run は応答を返すと CPU を止めるため（8章） |
+| DB | RDS PostgreSQL 16 | Supabase Free（オレゴン・PostgreSQL 17・500 MB） | 7日アクセスが無いと休止するので、GitHub Actions が3日ごとに実際に `SELECT` を流す |
+| ファイル | S3 | R2（10 GB・転送量無料） | S3 互換なので、エンドポイントを変えるだけで済んだ |
+| 埋め込み | Titan V2（1024次元） | Workers AI の bge-m3（1024次元） | 次元は同じでも意味の空間が違うので、新しい列 `embedding_v2` に全件を入れ直した（5.4） |
+| 生成・画像認識 | Claude Haiku 4.5 | Workers AI の gemma-4-26b | 無料枠の入力を学習に使わないと規約に書いてあるものだけを候補にした。Gemini の無料枠は、機密情報を送らないよう規約にあるので外した |
+| 認証 | Cognito | Supabase Auth（招待制・メールとパスワード） | 利用先の Microsoft 365 のアカウントでログインする案（Entra ID）は、利用先の承認が得られず見送った |
+| メール | SES | なし | 問い合わせはアプリの中の一覧で見る |
+| 監視 | CloudWatch のアラーム | Cloud Monitoring の稼働時間チェック（backend・rag・画面を5分ごとに3地域から。10分失敗するとメール） | `/health` は DB を見ないので、DB の異常は keep-alive の失敗で気づく |
+| バックアップ | AWS Backup（日次・14日） | GitHub Actions で毎月 `pg_dump` を取り、非公開リポジトリの Release に12世代置く | 復元できることも確かめた |
+
+- **米国に置いた。** Cloud Run の無料の通信量は北米から出るものだけが対象のため。API と DB は1回の質問で何度も往復するので、DB も同じオレゴンに置いた。引き換えに、日本からは0.1〜0.2秒遅くなる
+- **差し替え口を先に作った。** 埋め込み・生成・認証・ストレージを環境変数で切り替えられるようにし（4.1）、AWS版を動かしたまま新しい環境を組み立てた
+- **切り替えの実測**（2026-09-11の夜）: バックアップ 3分51秒（350ファイル・628 MB）、Supabase への復元 1分23秒、全4,577チャンクの埋め込み直し 18分7秒。埋め込み直しを除く機械の作業は合計7分3秒。翌日に AWS を撤収した
+- **Workers AI の無料枠**は直近24時間で10,000ニューロン（使用量の単位）で、質問1回で約46使う。公式には「0時（UTC）に戻る」とあるが、使い切ったときに0時を過ぎても戻らず、直近24時間の移動窓で数えていると判断した
+
+止まる直前の規模は、DB 86 MB（チャンク4,572件）、R2 約0.6 GB（約350ファイル）、質問は多い日で1日5件ほど、回答にかかる時間は3.5〜14.8秒、backend の起動待ちは約2秒だった。
+
+### 11.3 止まった理由（2026-10-11）
+
+Cloud Run の無料枠は、**課金アカウントがつながっていることが前提**である。無料構成はこれを Google Cloud の無料トライアルの課金アカウントにつないでいた。トライアルが2026-10-11に終わってアカウントが閉じると、Cloud Run と Cloud Tasks は「課金が無効」で動かなくなった。画面は Pages から出るが API に届かず、質問すると「Failed to fetch」になる。
+
+データは Supabase と R2 にあるので無事だった。Google Cloud に置いていたのは、コンテナ・キュー・秘密情報・監視の設定だけで、どれもデプロイのスクリプトに書いてある。
+
+学んだのは、**「無料枠の中で使う」と「請求が起こりえない」は別のこと**だという点である。Cloud Run の無料枠は有料アカウントに付く割引で、トライアルの間は請求が来なかっただけだった。次の構成は、上限を超えると請求ではなくエラーで止まるサービスだけで組む。
+
+検討した移り先（2026-10-25に各社の公式ページで確認）:
+
+| 案 | 結果 |
+|---|---|
+| Google の課金を有効に戻す | コードは変えずに済むが、カードを登録した有料アカウントになり、少額の請求がありうる |
+| Render の無料プランにコンテナをそのまま置く | 512 MB・0.1 CPU。15分使わないと眠り、起こすのに約1分かかる。無料の稼働は全サービス合わせて月750時間で、2つを常に起こしておくと1,488時間で超える。公式に「本番には使わない」とある。応急処置にしか使えない |
+| Cloudflare Workers の無料プランに書き直す | 1回の CPU 時間が10ミリ秒まで。GraphQL と Prisma で200行のマニュアル一覧を返すだけで超えうる |
+| Convex に書き直す | 文字検索が空白と句読点でしか区切らず、部分一致も無い。型番や電話番号を文字どおり拾うキーワード検索（6.3）が作れない |
+| Hugging Face Spaces・Fly.io・Railway・Vercel Hobby・Oracle Cloud | 順に、Docker が有料プランだけになった・新しい組織には無料枠が無い・試用のあとは月1ドル分のクレジットだけ・商用不可・カードが必須で、使われていないと判定されると回収される |
+| **Supabase Edge Functions に書き直す** | 採用（11.4） |
+
+### 11.4 書き直し版（計画。2026-10-30 時点で未着手）
+
+> [!NOTE]
+> この節は設計と見積もりで、まだ作っていない。数値は今の構成で測った値と、各サービスの公式の上限から出したものである。
+
+backend（NestJS）と rag（Python）の2つのコンテナをやめ、**TypeScript の関数1つ**にまとめて Supabase の Edge Functions（Deno）で動かす。DB・認証・ファイル・AI は今のものをそのまま使うので、**データは動かさない**。
+
+```mermaid
+flowchart LR
+  B["ブラウザ"] -->|"画面"| P["Cloudflare Pages"]
+  B -->|"ログイン"| AU["Supabase Auth"]
+  B -->|"GraphQL / SSE + JWT"| EF["API<br/>Supabase Edge Functions"]
+  B -->|"署名付きURLで PUT / GET"| R2[("Cloudflare R2")]
+  EF -->|"hybrid_search ほか"| DB[("Supabase<br/>PostgreSQL 17 + pgvector")]
+  DB -->|"pg_cron・pgmq から pg_net で呼ぶ"| EF
+  EF -->|"埋め込み・生成・画像認識"| AI["Workers AI"]
+```
+
+| 部品 | 無料構成 | 書き直し版 |
+|---|---|---|
+| API | backend（NestJS）と rag（FastAPI）の2つ | Edge Functions の1つ。GraphQL は graphql-yoga にし、スキーマは今のものを使う。画面の69の操作は変えない |
+| 検索 | rag が3本の SQL を流し、Python で RRF をかける | Postgres の関数 `hybrid_search(...)` 1つにまとめる（3経路と RRF の中身は6章と同じ）。Prisma が作るマイグレーションは索引を消すので、手で書く（5.3） |
+| 回答 | rag が gemma を呼び、backend を経由して流す | 関数が Workers AI の REST API を呼び、SSE でそのまま流す。プロンプトは移すだけ |
+| 取り込み | rag がサーバーで文字を抜き出し、スキャンのページを書き起こす（最大60ページ・4並列） | **管理者のブラウザで抜き出す**（pdf.js・SheetJS・mammoth・JSZip・msgreader）。スキャンのページは canvas に描いて1ページずつ書き起こしの関数へ送り、チャンクは32件ずつ埋め込みと保存の関数へ送る |
+| 裏の処理 | Cloud Tasks → `/internal/*` | Supabase の pg_cron・pgmq・pg_net。再分類は1回の呼び出しで1バッチずつ進める。ゴミ箱の掃除（R2 のファイルも消す）と、止まった取り込みの片付けも定期実行にする |
+| 監視 | Cloud Monitoring のメール | 定期実行で `/health` を見て、失敗したら GitHub に Issue を立てる（GitHub からメールが届く） |
+| 画面・DB・認証・ファイル・AI | Pages・Supabase・R2・Workers AI | 変えない。画面は API の住所を変えてビルドし直すだけ |
+
+Cloudflare Workers ではなく Edge Functions にしたのは、**1回の CPU 時間の上限が2秒**あるからである（Workers の無料プランは10ミリ秒）。通信の待ちは数えないので、回答の大半を占める Workers AI の待ちは上限に入らない。
+
+Supabase Free の上限と、今の使い方との比較:
+
+| 上限 | 値 | 今の使い方 |
+|---|---|---|
+| 1回の時間 | 150秒 | 回答は3.5〜14.8秒。書き起こしは1ページずつ送るので、ページ数に縛られない |
+| メモリ | 256 MB | ファイルの処理をブラウザへ移すので、関数は大きなファイルを持たない |
+| 呼び出し | 月50万回 | いちばん多かった日（10/9。開きっぱなしの画面の自動更新を含む）の勢いが続いても月15万回ほど |
+| 転送量 | 月5 GB（DB の通信と合わせて） | API の応答もここに数えられる。主な原因は3〜5秒ごとの自動更新なので、間隔を延ばすか、変わったときだけ届く仕組みに替える |
+| DB | 500 MB | 86 MB |
+
+**変わること**:
+
+- 起動待ちがほぼ無くなる（今は Cloud Run の起動に約2秒）
+- マニュアルを登録した管理者は、取り込みが終わるまで画面を開いておく必要がある
+- 新しく登録するファイルは、文字の抜き出し方（pypdf → pdf.js）が変わるので、チャンクの中身が少し変わりうる。登録済みのものは変わらない
+- 費用は0円。新しくカードを登録しない。Supabase と Workers AI は上限を超えると請求ではなくエラーで止まる。R2 は無料枠（10 GB）の約6%しか使っていない
+
+**進め方**（全体で2〜3週間）:
+
+1. **試作（2〜3日）**。次を確かめ、1つでも駄目なら Cloudflare Workers（Hyperdrive で DB への接続をまとめ、Prisma より軽い postgres.js を使う）に切り替える
+   - `hybrid_search` とチャットのストリーミングを載せて、CPU 時間と応答時間を測る
+   - 150秒の上限が1回の呼び出しごとか、関数を動かす入れ物（ワーカー）の寿命かを、長い回答で確かめる。寿命なら、入れ物の終わりがけに始まった回答が途中で切れうる
+   - Prisma が Deno で動くか。動かなければ postgres.js にする
+   - 本番の使い方で、1日の転送量を測る
+   - 10本のマニュアルで、pdf.js の抜き出した文字を今のチャンクと比べる
+2. 読み取りの GraphQL
+3. チャットと、チャットからの管理操作
+4. ブラウザでの取り込みと、書き起こし・埋め込みの関数
+5. 再分類と定期実行
+6. 画面の API の宛先を新しい関数に替えてビルドし直し、Google Cloud の設定を片付ける
+
+### 11.5 3つの構成を並べる
+
+| | AWS版 | 無料構成 | 書き直し版（計画） |
+|---|---|---|---|
+| 月額 | 約$85（クレジットから） | 0円（課金アカウントが前提） | 0円（上限で止まる） |
+| APIを動かす場所 | Fargate ×2 + ALB（東京） | Cloud Run ×2（オレゴン） | Edge Functions ×1（DB と同じ地域に固定） |
+| 言語 | TypeScript + Python | TypeScript + Python | TypeScript |
+| 起動待ち | なし（常に起動） | 約2秒 | ほぼなし |
+| DB | RDS PostgreSQL 16 | Supabase PostgreSQL 17 | 同じ |
+| ファイル | S3 | R2 | 同じ |
+| AI | Bedrock（Claude Haiku 4.5・Titan V2） | Workers AI（gemma-4-26b・bge-m3） | 同じ |
+| 認証 | Cognito | Supabase Auth | 同じ |
+| 裏の処理 | 同じプロセスの中 | Cloud Tasks | pg_cron・pgmq |
+| 文字の抜き出し | rag（サーバー） | rag（サーバー） | 管理者のブラウザ |
+
+---
+
+## 12. 本資料について
+
+本資料は、Claude Code（Anthropic）がこのリポジトリのコードを読んで下書きしたものである。数値や設定はコード（b9c52ff時点）から引いている。11章は、構築と移行の記録（[deployment-plan.md][deploy-plan]・[zero-cost-migration-plan.md][zero-cost-plan] と、非公開の開発用リポジトリにある移行の手順書）と、2026-10-25の調査から引いている。
+
+[portfolio]: https://github.com/mocaluna0117/manualy/blob/main/docs/portfolio/PORTFOLIO.md
+[deploy-plan]: https://github.com/mocaluna0117/manualy/blob/main/docs/deployment-plan.md
+[zero-cost-plan]: https://github.com/mocaluna0117/manualy/blob/main/docs/zero-cost-migration-plan.md
+[deploy-cloudrun]: https://github.com/mocaluna0117/manualy/blob/main/scripts/deploy-cloudrun.sh
 
 [main]: https://github.com/mocaluna0117/manualy/blob/main/rag/main.py
 [chunking]: https://github.com/mocaluna0117/manualy/blob/main/rag/chunking.py
