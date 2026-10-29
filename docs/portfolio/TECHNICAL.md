@@ -655,7 +655,7 @@ Supabase Free の上限と、今の使い方との比較:
 
 ## 12. 本資料について
 
-本資料は、Claude Code（Anthropic）がこのリポジトリのコードを読んで下書きしたものである。数値や設定はコード（b9c52ff時点）から引いている。11章は、構築と移行の記録（[deployment-plan.md][deploy-plan]・[zero-cost-migration-plan.md][zero-cost-plan] と、非公開の開発用リポジトリにある移行の手順書）と、2026-10-25の調査から引いている。
+本資料の数値や設定は、コード（b9c52ff時点）から引いている。11章は、構築と移行の記録（[deployment-plan.md][deploy-plan]・[zero-cost-migration-plan.md][zero-cost-plan] と、非公開の開発用リポジトリにある移行の手順書）と、2026-10-25の調査から引いている。
 
 [portfolio]: https://github.com/mocaluna0117/manualy/blob/main/docs/portfolio/PORTFOLIO.md
 [deploy-plan]: https://github.com/mocaluna0117/manualy/blob/main/docs/deployment-plan.md
